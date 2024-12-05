@@ -9,6 +9,7 @@ services:
       - ./data:/usr/src/app/data
     environment:
       - NODE_ENV=development
+      - MONGO_URI=mongodb://db:27017/taskdb
     command: nodemon src/index.ts
     depends_on:
       - db

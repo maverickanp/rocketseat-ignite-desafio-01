@@ -1,71 +1,107 @@
 import { Request, Response } from 'express';
-import { TaskService } from '../services/TaskService';
 import fs from 'fs';
 import { parse } from 'csv-parse';
-import { v4 as uuidv4 } from 'uuid';
-import { Task } from '../models/Task';
-
+import { Task, TaskModel } from '../models/Task';
 
 export class TaskController {
-    private taskService = new TaskService();
+  async createTask(req: Request, res: Response): Promise<void> {
+      try {
+          const { title, description } = req.body;
 
-    createTask(req: Request, res: Response): void {
-        const { title, description } = req.body;
+          if (!title || !description) {
+              res.status(400).json({ error: 'Title and description are required.' });
+              return;
+          }
 
-        if (!title || !description) {
-            res.status(400).json({ error: 'Title and description are required.' });
-            return;
-        }
+          const newTask = await TaskModel.create({ title, description });
+          res.status(201).json(newTask);
+      } catch (error) {
+          console.log('error:', error)
+          res.status(500).json({ error: 'Error creating task.' });
+      }
+  }
 
-        const newTask = this.taskService.createTask(title, description);
-        res.status(201).json(newTask);
-    }
+  async listTasks(req: Request, res: Response): Promise<void> {
+      try {
+          const { title, description } = req.query;
+          let query = {};
 
-    listTasks(req: Request, res: Response): void {
-        const { title, description } = req.query;
+          if (title) {
+              query = { ...query, title: { $regex: title, $options: 'i' } };
+          }
 
-        const tasks = this.taskService.listTasks(title as string, description as string);
-        res.json(tasks);
-    }
+          if (description) {
+              query = { ...query, description: { $regex: description, $options: 'i' } };
+          }
 
-    updateTask(req: Request, res: Response): void {
-        const { id } = req.params;
-        const { title, description } = req.body;
+          const tasks = await TaskModel.find(query);
+          res.json(tasks);
+      } catch (error) {
+          res.status(500).json({ error: 'Error listing tasks.' });
+      }
+  }
 
-        const task = this.taskService.updateTask(id, title, description);
-        if (!task) {
-            res.status(404).json({ error: 'Task not found.' });
-            return;
-        }
+  async updateTask(req: Request, res: Response): Promise<void> {
+      try {
+          const { id } = req.params;
+          const { title, description } = req.body;
 
-        res.json(task);
-    }
+          const updatedTask = await TaskModel.findByIdAndUpdate(
+              id,
+              { title, description, updated_at: new Date() },
+              { new: true }
+          );
 
-    deleteTask(req: Request, res: Response): void {
-        const { id } = req.params;
+          if (!updatedTask) {
+              res.status(404).json({ error: 'Task not found.' });
+              return;
+          }
 
-        const deleted = this.taskService.deleteTask(id);
-        if (!deleted) {
-            res.status(404).json({ error: 'Task not found.' });
-            return;
-        }
+          res.json(updatedTask);
+      } catch (error) {
+          res.status(500).json({ error: 'Error updating task.' });
+      }
+  }
 
-        res.status(204).send();
-    }
+  async deleteTask(req: Request, res: Response): Promise<void> {
+      try {
+          const { id } = req.params;
 
-    completeTask(req: Request, res: Response): void {
-        const { id } = req.params;
+          const deletedTask = await TaskModel.findByIdAndDelete(id);
 
-        const task = this.taskService.toggleTaskCompletion(id);
-        if (!task) {
-            res.status(404).json({ error: 'Task not found.' });
-            return;
-        }
+          if (!deletedTask) {
+              res.status(404).json({ error: 'Task not found.' });
+              return;
+          }
 
-        res.json(task);
-    }
+          res.status(204).send();
+      } catch (error) {
+          res.status(500).json({ error: 'Error deleting task.' });
+      }
+  }
 
-    importTasks(req: Request, res: Response): void {
+  async completeTask(req: Request, res: Response): Promise<void> {
+      try {
+          const { id } = req.params;
+
+          const task = await TaskModel.findById(id);
+
+          if (!task) {
+              res.status(404).json({ error: 'Task not found.' });
+              return;
+          }
+
+          task.completed_at = task.completed_at ? null : new Date();
+          task.updated_at = new Date();
+          await task.save();
+
+          res.json(task);
+      } catch (error) {
+          res.status(500).json({ error: 'Error updating task status.' });
+      }
+  }
+
+  importTasks(req: Request, res: Response): void {
       const filePath = './data/tasks.csv'; // Caminho do arquivo CSV
 
       const importedTasks: Task[] = [];
@@ -75,21 +111,19 @@ export class TaskController {
           .on('data', async (row) => {
               const [title, description] = row;
 
-              const newTask: Task = {
-                  id: uuidv4(),
+              const newTask = new TaskModel({
                   title,
                   description,
                   completed_at: null,
                   created_at: new Date(),
                   updated_at: new Date(),
-              };
+              });
 
               importedTasks.push(newTask);
-              this.taskService.createTask(title, description);
+              await newTask.save();
           })
           .on('end', () => {
-
-              res.status(201).json({ message: 'Tasks imported successfully.', tasks: importedTasks });
+              res.status(201).json({ message: 'Tasks imported successfully.', importedTasks });
           })
           .on('error', (err) => {
               res.status(500).json({ error: 'Error importing tasks.' });
